@@ -32,6 +32,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# briefing pessoal do projeto — não vai para o repositório público
+/CLAUDE.md
 
 # vercel
 .vercel
