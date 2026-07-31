@@ -4,11 +4,14 @@ import { useCallback, useRef, useState } from "react";
 
 import { readNdjsonStream } from "@/lib/ndjson";
 import type { ChatStreamEvent } from "@/types/chat";
+import type { Source } from "@/types/rag";
 
 export interface UiMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  /** Trechos que embasaram a resposta; só em mensagens do assistente. */
+  sources?: Source[];
 }
 
 export type ChatStatus = "idle" | "streaming";
@@ -36,13 +39,11 @@ export function useChat() {
     setMessages(next);
   }, []);
 
-  const appendToAssistant = useCallback(
-    (id: string, chunk: string) => {
+  const updateAssistant = useCallback(
+    (id: string, patch: (message: UiMessage) => UiMessage) => {
       commit(
         historyRef.current.map((message) =>
-          message.id === id
-            ? { ...message, content: message.content + chunk }
-            : message,
+          message.id === id ? patch(message) : message,
         ),
       );
     },
@@ -87,7 +88,15 @@ export function useChat() {
 
         for await (const event of readNdjsonStream<ChatStreamEvent>(response.body)) {
           if (event.type === "token") {
-            appendToAssistant(assistantMessage.id, event.value);
+            updateAssistant(assistantMessage.id, (message) => ({
+              ...message,
+              content: message.content + event.value,
+            }));
+          } else if (event.type === "sources") {
+            updateAssistant(assistantMessage.id, (message) => ({
+              ...message,
+              sources: event.sources,
+            }));
           } else if (event.type === "error") {
             throw new Error(event.message);
           }
@@ -109,7 +118,7 @@ export function useChat() {
         setStatus("idle");
       }
     },
-    [appendToAssistant, commit],
+    [updateAssistant, commit],
   );
 
   const stop = useCallback(() => {

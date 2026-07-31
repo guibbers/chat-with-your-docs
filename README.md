@@ -22,8 +22,8 @@ suas perguntas **citando de onde tirou cada informação**.
 ## Como está agora
 
 - [x] Chat com streaming token a token via OpenRouter
-- [ ] Upload de documentos + chunking + embeddings
-- [ ] Busca semântica com citações das fontes
+- [x] Upload de documentos (`.md`, `.txt`, `.pdf`) + chunking + embeddings
+- [x] Busca semântica com citações das fontes
 - [ ] Tool calling (`buscar_docs`)
 
 ## Rodando local
@@ -46,14 +46,28 @@ Requer Node 22.12+ (a versão está fixada em `.node-version` e em `engines` do
 
 ## Arquitetura
 
+**Ingestão** — acontece uma vez, no upload:
+
 ```
-Browser                        Servidor (Next.js)              OpenRouter
-───────                        ──────────────────              ──────────
-useChat ──── POST /api/chat ──▶ valida o corpo
-                                monta o system prompt
-                                └─▶ streamChatCompletion ────▶ modelo (SSE)
-        ◀─── NDJSON ────────────── converte SSE em eventos ◀───┘
+arquivo ──▶ extrai texto ──▶ chunking ──▶ embeddings ──▶ Supabase
+ .md         (unpdf p/ PDF)   ~1000 chars   OpenRouter    documents
+ .txt                         c/ overlap    (em lote)     chunks + vector(1536)
+ .pdf
+```
+
+**Consulta** — a cada pergunta:
+
+```
+Browser                     Servidor (Next.js)            OpenRouter / Supabase
+───────                     ──────────────────            ─────────────────────
+useChat ─ POST /api/chat ──▶ valida o corpo
+                             embeda a pergunta ─────────▶ /embeddings
+                             match_chunks (cosseno) ────▶ pgvector, HNSW
+        ◀── evento sources ── monta o contexto numerado
+                             └─▶ streamChatCompletion ──▶ modelo (SSE)
+        ◀── eventos token ──── converte SSE em eventos ◀──┘
         renderiza markdown
+        + citações [n]
 ```
 
 Dois formatos de stream, de propósito:
@@ -75,6 +89,20 @@ Dois formatos de stream, de propósito:
   token já saiu, os headers foram enviados: só resta um evento `{"type":"error"}`.
 - **Variáveis de ambiente lidas sob demanda.** O build da Vercel não precisa do
   segredo; a falha aparece com mensagem clara na hora da chamada.
+- **Embeddings pelo próprio OpenRouter.** O endpoint `/v1/embeddings` aceita a
+  mesma chave do chat, então o projeto inteiro roda com um único segredo.
+- **Ingestão transacional.** O documento é gravado antes dos chunks, para ter o
+  id que eles referenciam. Se os embeddings falharem, o documento é apagado e o
+  `on delete cascade` leva os chunks junto — nunca sobra documento sem chunks,
+  que apareceria na lista mas nunca seria encontrado pela busca.
+- **Piso de similaridade.** A busca por cosseno sempre devolve *algum* vizinho
+  mais próximo, mesmo quando nada no acervo tem a ver com a pergunta. Sem o
+  corte em 0.3, o modelo receberia contexto irrelevante e citaria fontes que não
+  respondem nada.
+- **Três system prompts, não um.** Responder com trechos, responder sem nada
+  relevante, e responder com o acervo vazio são situações diferentes para quem
+  lê. No segundo caso o modelo é instruído a avisar que a resposta não veio dos
+  documentos — sem isso, não há como distinguir citação de chute.
 
 ## O que aprendi
 

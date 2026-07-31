@@ -1,3 +1,5 @@
+import type { Source } from "@/types/rag";
+
 /** Papéis aceitos numa conversa. */
 export type ChatRole = "system" | "user" | "assistant";
 
@@ -15,5 +17,6 @@ export interface ChatMessage {
  */
 export type ChatStreamEvent =
   | { type: "token"; value: string }
+  | { type: "sources"; sources: Source[] }
   | { type: "error"; message: string }
   | { type: "done" };
