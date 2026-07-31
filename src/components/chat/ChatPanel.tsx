@@ -7,9 +7,9 @@ import { MessageBubble } from "@/components/chat/MessageBubble";
 import { useChat } from "@/hooks/useChat";
 
 const SUGGESTIONS = [
-  "O que é RAG, em duas frases?",
-  "Explique embeddings para quem nunca ouviu falar.",
-  "Quando vale a pena usar tool calling?",
+  "Sobre o que são os documentos que eu enviei?",
+  "Resuma o documento em três pontos.",
+  "Quais números aparecem nos documentos?",
 ];
 
 export function ChatPanel() {
@@ -23,11 +23,13 @@ export function ChatPanel() {
   }, [messages]);
 
   return (
-    <div className="flex h-dvh flex-col">
+    <div className="flex min-w-0 flex-1 flex-col">
       <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3 dark:border-slate-800">
         <div>
           <h1 className="text-sm font-semibold">rag-notes</h1>
-          <p className="text-xs text-slate-500">converse com os seus documentos</p>
+          <p className="text-xs text-slate-500">
+            respostas com citação da fonte
+          </p>
         </div>
 
         {messages.length > 0 && (
@@ -82,7 +84,8 @@ function EmptyState({ onPick }: { onPick: (text: string) => void }) {
       <div>
         <h2 className="text-lg font-semibold">Comece por aqui</h2>
         <p className="mt-1 text-sm text-slate-500">
-          O upload de documentos entra na próxima etapa. Por enquanto, é o chat puro.
+          Envie um documento no painel ao lado e pergunte sobre ele. Cada resposta
+          vem com os trechos que a embasaram.
         </p>
       </div>
 

@@ -1,6 +1,7 @@
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { Sources } from "@/components/chat/Sources";
 import type { UiMessage } from "@/hooks/useChat";
 
 interface MessageBubbleProps {
@@ -23,9 +24,14 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         {isUser ? (
           <p className="whitespace-pre-wrap">{message.content}</p>
         ) : message.content ? (
-          <div className="prose-chat">
-            <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
-          </div>
+          <>
+            <div className="prose-chat">
+              <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
+            </div>
+            {message.sources && message.sources.length > 0 && (
+              <Sources sources={message.sources} />
+            )}
+          </>
         ) : (
           <TypingDots />
         )}

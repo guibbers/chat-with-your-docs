@@ -1,6 +1,8 @@
 import { MissingEnvError } from "@/lib/env";
+import { countDocuments } from "@/lib/ingest";
 import { OpenRouterError, streamChatCompletion } from "@/lib/openrouter";
-import { buildConversation } from "@/lib/prompts";
+import { buildConversation, buildRagConversation } from "@/lib/prompts";
+import { searchChunks, toSource } from "@/lib/retrieval";
 import { parseChatRequest } from "@/lib/validation";
 import type { ChatStreamEvent } from "@/types/chat";
 
@@ -22,7 +24,8 @@ export async function POST(request: Request) {
     return jsonError(parsed.error, 400);
   }
 
-  const conversation = buildConversation(parsed.value);
+  const history = parsed.value;
+  const question = history.at(-1)!.content;
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
@@ -40,6 +43,22 @@ export async function POST(request: Request) {
       };
 
       try {
+        // A busca acontece antes do primeiro token: as fontes são enviadas
+        // primeiro para que a UI já mostre de onde a resposta vai sair.
+        const chunks = await searchChunks(question, { signal: request.signal });
+
+        if (chunks.length > 0) {
+          send({ type: "sources", sources: chunks.map(toSource) });
+        }
+
+        const conversation =
+          chunks.length > 0
+            ? buildRagConversation(history, chunks)
+            : buildConversation(history, {
+                // Distingue "acervo vazio" de "nada relevante achado".
+                hasDocuments: (await countDocuments()) > 0,
+              });
+
         for await (const token of streamChatCompletion({
           messages: conversation,
           signal: request.signal,
