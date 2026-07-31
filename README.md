@@ -24,7 +24,7 @@ suas perguntas **citando de onde tirou cada informação**.
 - [x] Chat com streaming token a token via OpenRouter
 - [x] Upload de documentos (`.md`, `.txt`, `.pdf`) + chunking + embeddings
 - [x] Busca semântica com citações das fontes
-- [ ] Tool calling (`buscar_docs`)
+- [x] Tool calling: o modelo decide quando chamar `buscar_docs`
 
 ## Rodando local
 
@@ -55,20 +55,29 @@ arquivo ──▶ extrai texto ──▶ chunking ──▶ embeddings ──▶
  .pdf
 ```
 
-**Consulta** — a cada pergunta:
+**Consulta** — a cada pergunta, quem decide buscar é o modelo:
 
 ```
-Browser                     Servidor (Next.js)            OpenRouter / Supabase
-───────                     ──────────────────            ─────────────────────
-useChat ─ POST /api/chat ──▶ valida o corpo
-                             embeda a pergunta ─────────▶ /embeddings
-                             match_chunks (cosseno) ────▶ pgvector, HNSW
-        ◀── evento sources ── monta o contexto numerado
-                             └─▶ streamChatCompletion ──▶ modelo (SSE)
-        ◀── eventos token ──── converte SSE em eventos ◀──┘
+Browser                   Servidor (Next.js)             OpenRouter / Supabase
+───────                   ──────────────────             ─────────────────────
+useChat ─ POST /api/chat ─▶ valida o corpo
+                            runAgent ────────────────────▶ modelo + tools (SSE)
+                                                            │
+                            ┌── o modelo pede buscar_docs ◀─┘
+        ◀─ evento searching ┤
+                            ├─ embeda a consulta ────────▶ /embeddings
+                            ├─ match_chunks (cosseno) ───▶ pgvector, HNSW
+        ◀─ evento sources ──┤
+                            └─ devolve os trechos ───────▶ modelo responde (SSE)
+        ◀─ eventos token ──── converte SSE em eventos ◀────┘
         renderiza markdown
         + citações [n]
 ```
+
+Sem tool calling a busca rodaria sempre, antes do modelo. Com ele, "oi" não
+gasta uma busca, e em perguntas de acompanhamento o modelo reformula a consulta
+— `"e quantos dias presenciais?"` vira `"quantos dias presenciais no trabalho"`,
+porque a busca semântica não enxerga o histórico da conversa.
 
 Dois formatos de stream, de propósito:
 
@@ -99,10 +108,16 @@ Dois formatos de stream, de propósito:
   mais próximo, mesmo quando nada no acervo tem a ver com a pergunta. Sem o
   corte em 0.3, o modelo receberia contexto irrelevante e citaria fontes que não
   respondem nada.
-- **Três system prompts, não um.** Responder com trechos, responder sem nada
-  relevante, e responder com o acervo vazio são situações diferentes para quem
-  lê. No segundo caso o modelo é instruído a avisar que a resposta não veio dos
-  documentos — sem isso, não há como distinguir citação de chute.
+- **A busca é uma ferramenta, não uma etapa fixa.** Com tool calling, o modelo
+  decide se e como buscar. Isso resolve dois casos que a busca sempre-antes
+  errava: saudações, que gastavam uma chamada de embedding à toa, e perguntas
+  de acompanhamento, em que a frase isolada do usuário não recupera nada.
+- **Numeração contínua entre buscas.** O modelo pode buscar mais de uma vez no
+  mesmo turno. Se cada resultado fosse numerado a partir de [1], dois trechos
+  diferentes se chamariam [1] e a citação deixaria de identificar a fonte.
+- **A UI separa citado de consultado.** A busca devolve os cinco vizinhos mais
+  próximos, mas o modelo costuma usar um ou dois. Listar todos como "fontes"
+  faria a resposta parecer mais ancorada do que é.
 
 ## O que aprendi
 

@@ -12,6 +12,8 @@ export interface UiMessage {
   content: string;
   /** Trechos que embasaram a resposta; só em mensagens do assistente. */
   sources?: Source[];
+  /** Consultas que o modelo decidiu fazer nos documentos, na ordem. */
+  searches?: string[];
 }
 
 export type ChatStatus = "idle" | "streaming";
@@ -93,9 +95,16 @@ export function useChat() {
               content: message.content + event.value,
             }));
           } else if (event.type === "sources") {
+            // Acumula: o modelo pode buscar mais de uma vez, e a numeração das
+            // citações continua de onde parou.
             updateAssistant(assistantMessage.id, (message) => ({
               ...message,
-              sources: event.sources,
+              sources: [...(message.sources ?? []), ...event.sources],
+            }));
+          } else if (event.type === "searching") {
+            updateAssistant(assistantMessage.id, (message) => ({
+              ...message,
+              searches: [...(message.searches ?? []), event.query],
             }));
           } else if (event.type === "error") {
             throw new Error(event.message);
