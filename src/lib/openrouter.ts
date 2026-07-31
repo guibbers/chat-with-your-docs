@@ -1,6 +1,7 @@
 import { env } from "@/lib/env";
 import { readSseStream } from "@/lib/sse";
 import type { ChatMessage } from "@/types/chat";
+import type { CompletionEvent, ToolDefinition } from "@/types/tools";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 
@@ -19,29 +20,47 @@ export class OpenRouterError extends Error {
 /** Formato do chunk de streaming (subconjunto do que usamos). */
 interface StreamChunk {
   choices?: Array<{
-    delta?: { content?: string | null };
+    delta?: {
+      content?: string | null;
+      tool_calls?: ToolCallDelta[];
+    };
     finish_reason?: string | null;
   }>;
   error?: { message?: string };
+}
+
+/**
+ * Fragmento de tool call. O modelo emite o nome uma vez e depois vai
+ * cuspindo os argumentos em pedaços, todos identificados pelo mesmo `index`.
+ */
+interface ToolCallDelta {
+  index: number;
+  id?: string;
+  function?: { name?: string; arguments?: string };
 }
 
 export interface StreamChatOptions {
   messages: ChatMessage[];
   model?: string;
   temperature?: number;
+  tools?: ToolDefinition[];
   signal?: AbortSignal;
 }
 
 /**
- * Chama o OpenRouter em modo stream e devolve os deltas de texto conforme
- * chegam. O consumidor decide o que fazer com cada pedaço.
+ * Chama o OpenRouter em modo stream e emite eventos conforme chegam.
+ *
+ * Texto sai token a token, na hora. Tool calls só saem no fim: chegam
+ * fatiadas em vários chunks (o JSON dos argumentos vem em pedaços) e não
+ * significam nada até estarem completas.
  */
 export async function* streamChatCompletion({
   messages,
   model,
   temperature = 0.3,
+  tools,
   signal,
-}: StreamChatOptions): AsyncGenerator<string> {
+}: StreamChatOptions): AsyncGenerator<CompletionEvent> {
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
     signal,
@@ -57,6 +76,7 @@ export async function* streamChatCompletion({
       messages,
       temperature,
       stream: true,
+      ...(tools?.length ? { tools, tool_choice: "auto" } : {}),
     }),
   });
 
@@ -68,6 +88,9 @@ export async function* streamChatCompletion({
       detail.slice(0, 500),
     );
   }
+
+  // Acumulador de tool calls, indexado pelo `index` que o modelo manda.
+  const pending = new Map<number, { id: string; name: string; arguments: string }>();
 
   for await (const payload of readSseStream(response.body)) {
     let chunk: StreamChunk;
@@ -87,7 +110,29 @@ export async function* streamChatCompletion({
       );
     }
 
-    const delta = chunk.choices?.[0]?.delta?.content;
-    if (delta) yield delta;
+    const delta = chunk.choices?.[0]?.delta;
+    if (!delta) continue;
+
+    if (delta.content) yield { type: "text", value: delta.content };
+
+    for (const call of delta.tool_calls ?? []) {
+      const current = pending.get(call.index) ?? { id: "", name: "", arguments: "" };
+
+      pending.set(call.index, {
+        id: call.id ?? current.id,
+        name: call.function?.name ?? current.name,
+        // Os argumentos chegam fatiados e precisam ser concatenados na ordem.
+        arguments: current.arguments + (call.function?.arguments ?? ""),
+      });
+    }
+  }
+
+  if (pending.size > 0) {
+    yield {
+      type: "tool_calls",
+      calls: [...pending.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([, call]) => call),
+    };
   }
 }

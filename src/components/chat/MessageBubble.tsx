@@ -23,20 +23,50 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       >
         {isUser ? (
           <p className="whitespace-pre-wrap">{message.content}</p>
-        ) : message.content ? (
+        ) : (
           <>
-            <div className="prose-chat">
-              <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
-            </div>
-            {message.sources && message.sources.length > 0 && (
-              <Sources sources={message.sources} />
+            {message.searches && message.searches.length > 0 && (
+              <SearchTrace searches={message.searches} />
+            )}
+
+            {message.content ? (
+              <>
+                <div className="prose-chat">
+                  <Markdown remarkPlugins={[remarkGfm]}>{message.content}</Markdown>
+                </div>
+                {message.sources && message.sources.length > 0 && (
+                  <Sources sources={message.sources} answer={message.content} />
+                )}
+              </>
+            ) : (
+              <TypingDots />
             )}
           </>
-        ) : (
-          <TypingDots />
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Mostra as buscas que o modelo decidiu fazer. Deixa visível que houve tool
+ * calling — e permite ver quando ele reformula a consulta sozinho.
+ */
+function SearchTrace({ searches }: { searches: string[] }) {
+  return (
+    <ul className="mb-2 flex flex-col gap-1">
+      {searches.map((query, position) => (
+        <li
+          key={`${position}-${query}`}
+          className="flex items-center gap-1.5 text-xs text-slate-500"
+        >
+          <span aria-hidden>🔍</span>
+          <span className="italic">
+            {query ? `buscou por "${query}"` : "buscou nos documentos"}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
