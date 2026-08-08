@@ -6,6 +6,7 @@ import {
 } from "@/lib/extract";
 import { FileTooLargeError, ingestDocument, listDocuments } from "@/lib/ingest";
 import { OpenRouterError } from "@/lib/openrouter";
+import { clientIp, hitRateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -39,6 +40,20 @@ export async function POST(request: Request) {
     return Response.json(
       { error: `Nenhum arquivo enviado. Aceito ${ACCEPTED_EXTENSIONS.join(", ")}.` },
       { status: 400 },
+    );
+  }
+
+  // Teto mais apertado que o do chat: cada upload gera embeddings de dezenas
+  // de chunks, então é o caminho mais caro que um visitante pode disparar.
+  const limit = await hitRateLimit(`upload:${clientIp(request)}`, {
+    max: 10,
+    windowSeconds: 600,
+  });
+
+  if (!limit.allowed) {
+    return Response.json(
+      { error: `Muitos envios seguidos. Tente de novo em ${limit.retryAfter}s.` },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfter) } },
     );
   }
 

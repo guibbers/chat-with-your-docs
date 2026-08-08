@@ -1,6 +1,7 @@
 import { runAgent } from "@/lib/agent";
 import { MissingEnvError } from "@/lib/env";
 import { OpenRouterError } from "@/lib/openrouter";
+import { clientIp, hitRateLimit } from "@/lib/rate-limit";
 import { toSource } from "@/lib/retrieval";
 import { parseChatRequest } from "@/lib/validation";
 import type { ChatStreamEvent } from "@/types/chat";
@@ -21,6 +22,20 @@ export async function POST(request: Request) {
 
   if (!parsed.ok) {
     return jsonError(parsed.error, 400);
+  }
+
+  // Depois da validação: pedido malformado nem chega a consumir cota.
+  const limit = await hitRateLimit(`chat:${clientIp(request)}`, {
+    max: 20,
+    windowSeconds: 60,
+  });
+
+  if (!limit.allowed) {
+    return jsonError(
+      `Muitas mensagens seguidas. Tente de novo em ${limit.retryAfter}s.`,
+      429,
+      { "Retry-After": String(limit.retryAfter) },
+    );
   }
 
   const encoder = new TextEncoder();
@@ -101,6 +116,10 @@ function toUserMessage(error: unknown): string {
   return "Não consegui gerar a resposta. Tente de novo.";
 }
 
-function jsonError(message: string, status: number) {
-  return Response.json({ error: message }, { status });
+function jsonError(
+  message: string,
+  status: number,
+  headers?: Record<string, string>,
+) {
+  return Response.json({ error: message }, { status, headers });
 }
