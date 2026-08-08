@@ -6,7 +6,7 @@ suas perguntas **citando de onde tirou cada informação**.
 
 > Projeto de portfólio, escrito do zero por [Guilherme Torres](https://github.com/guibbers).
 
-**Demo:** _em breve_
+**Demo:** https://chat-with-your-docs-topaz.vercel.app
 
 ## Stack
 
@@ -25,14 +25,19 @@ suas perguntas **citando de onde tirou cada informação**.
 - [x] Upload de documentos (`.md`, `.txt`, `.pdf`) + chunking + embeddings
 - [x] Busca semântica com citações das fontes
 - [x] Tool calling: o modelo decide quando chamar `buscar_docs`
+- [x] Rate limiting por IP, com função atômica no Postgres
+- [x] Deploy na Vercel
 
 ## Rodando local
 
 ```bash
 npm install
-cp .env.example .env.local   # e preencha OPENROUTER_API_KEY
+cp .env.example .env.local   # e preencha as chaves
 npm run dev
 ```
+
+O banco: rode os arquivos de [`supabase/migrations/`](supabase/migrations/) no
+SQL Editor do Supabase, em ordem. Os dois são idempotentes.
 
 Requer Node 22.12+ (a versão está fixada em `.node-version` e em `engines` do
 `package.json`; com `fnm` ou `nvm`, a troca é automática ao entrar na pasta).
@@ -118,7 +123,44 @@ Dois formatos de stream, de propósito:
 - **A UI separa citado de consultado.** A busca devolve os cinco vizinhos mais
   próximos, mas o modelo costuma usar um ou dois. Listar todos como "fontes"
   faria a resposta parecer mais ancorada do que é.
+- **O modelo recebe o inventário do acervo.** Os títulos dos documentos entram
+  no system prompt. Sem isso ele decide buscar pelo *formato* da pergunta, e
+  erra: "como faço para comprar ingresso?" não parece pergunta sobre documento,
+  mesmo com um PDF sobre ingressos no acervo.
+- **Rate limiting no Postgres, não em memória.** Na Vercel cada requisição pode
+  cair numa instância diferente, e um contador em memória zeraria a cada cold
+  start. A contagem cabe num único `INSERT ... ON CONFLICT DO UPDATE`, que é
+  atômico — em dois passos, duas requisições simultâneas leem o mesmo valor e
+  o teto vira decoração.
 
 ## O que aprendi
 
-_A ser escrito quando o projeto fechar._
+**A parte difícil do RAG não é a busca vetorial.** Embeddings e `match_chunks`
+saíram na primeira tentativa. O tempo foi embora nas bordas: cortar o texto em
+pedaços que ainda significam alguma coisa sozinhos, decidir o que fazer quando a
+busca não acha nada, e garantir que a citação `[n]` aponte para o trecho certo
+quando o modelo busca duas vezes no mesmo turno.
+
+**Um chunk ruim é invisível.** Não quebra nada, não aparece em log. Só faz a
+resposta certa nunca ser encontrada. Foi o que me convenceu a escrever o
+chunking descendo por níveis — parágrafo, frase, palavra — em vez de fatiar a
+cada N caracteres, e a cobrir isso com testes de verdade.
+
+**Tool calling mudou a natureza do app.** Com a busca sempre-antes, o app era um
+pipeline. Com a ferramenta, o modelo passou a reformular a consulta em perguntas
+de acompanhamento — `"e quantos dias presenciais?"` vira
+`"quantos dias presenciais no trabalho"` — porque ele vê o histórico e a busca
+semântica não. Foi a mudança que mais melhorou as respostas.
+
+**O que me pegou de verdade foi confiar em teste que não testava.** Um bug só
+apareceu quando abri a demo publicada e fiz a pergunta mais óbvia possível
+("do que trata o documento que eu enviei?"): o modelo respondeu *"Não sei."*
+Tudo passava — 45 testes, typecheck, lint, build. O erro não estava no código,
+estava no que o modelo sabia sobre o acervo. E no rate limit aconteceu o
+inverso: passei duas rodadas achando que o código estava quebrado, quando era o
+meu teste que enchia um bucket e media outro.
+
+**Honestidade é requisito de produto, não só postura.** Quando há documentos e
+nenhum é relevante, o modelo precisa dizer que a resposta não veio deles. Sem
+isso, quem lê não distingue citação de chute — e um app que cita fontes perde
+exatamente a razão de existir.
