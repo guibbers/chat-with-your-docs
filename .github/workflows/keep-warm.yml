@@ -1,0 +1,36 @@
+name: keep-warm
+
+# Rede de segurança para o cron da Vercel (ver vercel.json), que é quem mantém
+# o Supabase acordado no dia a dia. Os dois juntos cobrem a falha um do outro:
+# o cron da Vercel não morre por inatividade do repositório, e este workflow
+# continua de pé se o deploy quebrar.
+#
+# ATENÇÃO: o GitHub desativa workflows agendados após 60 dias sem COMMIT novo
+# no repositório. Mergear PR ou abrir issue não conta. Se este workflow for a
+# única proteção e o repositório ficar parado, ele para sem avisar direito.
+
+on:
+  schedule:
+    # Dias ímpares do mês, 04:17 UTC. O intervalo real varia de 1 a 3 dias
+    # (`*/2` no campo de dia significa dias 1, 3, 5... e não "a cada 2 dias"),
+    # o que continua folgado contra o pause de 7 dias do Supabase.
+    # Minuto quebrado de propósito: agendamentos na hora cheia disputam fila
+    # com o resto do GitHub e atrasam mais.
+    - cron: "17 4 */2 * *"
+  workflow_dispatch: {} # permite rodar na mão pelo botão "Run workflow"
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the app to keep Supabase awake
+        run: |
+          echo "Pinging at $(date -u)"
+          # -f       => falha (e te notifica por e-mail) se a app responder erro
+          # --retry  => não transforma uma oscilação de rede em alarme falso
+          curl -fsS \
+            --retry 3 --retry-delay 15 --retry-all-errors \
+            --max-time 60 \
+            "https://chat-with-your-docs-topaz.vercel.app/api/documents" \
+            -o /dev/null
+          echo "OK"
