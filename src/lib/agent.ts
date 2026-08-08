@@ -1,7 +1,8 @@
 import "server-only";
 
+import { listDocumentTitles } from "@/lib/ingest";
 import { streamChatCompletion } from "@/lib/openrouter";
-import { AGENT_SYSTEM_PROMPT } from "@/lib/prompts";
+import { buildAgentPrompt } from "@/lib/prompts";
 import type { RetrievedChunk } from "@/lib/retrieval";
 import { executeTool, TOOLS } from "@/lib/tools";
 import type { ChatMessage } from "@/types/chat";
@@ -37,8 +38,16 @@ export async function* runAgent({
   history,
   signal,
 }: RunAgentOptions): AsyncGenerator<AgentEvent> {
+  // O inventário do acervo entra no prompt para o modelo decidir a busca
+  // sabendo o que existe. Falha aqui não derruba a conversa: sem a lista ele
+  // ainda funciona, só decide pior.
+  const titles = await listDocumentTitles().catch((error) => {
+    console.error("[agent] não consegui listar os títulos", error);
+    return [];
+  });
+
   const messages: ChatMessage[] = [
-    { role: "system", content: AGENT_SYSTEM_PROMPT },
+    { role: "system", content: buildAgentPrompt(titles) },
     ...history,
   ];
 
