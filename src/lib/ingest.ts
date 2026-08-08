@@ -101,6 +101,28 @@ export async function listDocuments(): Promise<DocumentSummary[]> {
   }));
 }
 
+/** Teto de títulos injetados no prompt, para não estourar o contexto. */
+const TITLES_IN_PROMPT = 50;
+
+/**
+ * Só os títulos, para o modelo saber o que existe antes de decidir buscar.
+ *
+ * Sem esta lista ele julga pelo formato da pergunta: "como comprar ingresso?"
+ * não parece pergunta sobre documento, então ele responde de conhecimento
+ * geral — mesmo com um documento sobre ingressos no acervo.
+ */
+export async function listDocumentTitles(): Promise<string[]> {
+  const { data, error } = await getSupabase()
+    .from("documents")
+    .select("title")
+    .order("created_at", { ascending: false })
+    .limit(TITLES_IN_PROMPT);
+
+  if (error) throw new Error(`Não consegui listar os títulos: ${error.message}`);
+
+  return (data ?? []).map((row) => row.title as string);
+}
+
 /** Quantos documentos existem no acervo — sem trazer nenhuma linha. */
 export async function countDocuments(): Promise<number> {
   const { count, error } = await getSupabase()
